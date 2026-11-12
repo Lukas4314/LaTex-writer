@@ -7,7 +7,15 @@ import { parseBibLog, parseTexLog, type LogEntry } from './logparser.ts'
 import { isHiddenName } from './paths.ts'
 
 const COMPILE_TIMEOUT_MS = 60_000
-const TEX_BIN_DIRS = ['/Library/TeX/texbin', '/usr/local/texlive/2024/bin/universal-darwin', '/opt/homebrew/bin', '/usr/local/bin']
+
+const TEX_BIN_DIRS = [
+  '/Library/TeX/texbin',
+  '/usr/local/texlive/2024/bin/universal-darwin',
+  '/opt/homebrew/bin',
+  '/usr/local/bin',
+]
+
+
 
 export type Engine = 'pdflatex' | 'xelatex' | 'lualatex'
 
@@ -32,10 +40,17 @@ export type CompilerHooks = {
 }
 
 export function texEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+
   const extra = TEX_BIN_DIRS.filter((d) => fs.existsSync(d))
+
+  if (extra.length > 0) {
+    const separator = process.platform === 'win32' ? ';' : ':'
+    env.PATH = [...extra, process.env.PATH ?? ''].join(separator)
+  }
+
   return {
-    ...process.env,
-    PATH: [...extra, process.env.PATH ?? ''].join(':'),
+    ...env,
     // Unwrapped log lines make the log parseable.
     max_print_line: '10000',
     error_line: '254',
@@ -104,7 +119,7 @@ export class Compiler {
       try {
         const st = fs.statSync(file)
         if (st.isFile() && st.size > 0) return { file, version: Math.round(st.mtimeMs) }
-      } catch {}
+      } catch { }
     }
     return null
   }
@@ -159,7 +174,11 @@ export class Compiler {
     const child = this.child
     if (child?.pid) {
       try {
-        process.kill(-child.pid, 'SIGKILL')
+        if (process.platform === 'win32') {
+          child.kill()
+        } else {
+          process.kill(-child.pid, 'SIGKILL')
+        }
       } catch {
         child.kill('SIGKILL')
       }
@@ -229,7 +248,13 @@ export class Compiler {
     let output = ''
     let timedOut = false
     let spawnError: Error | null = null
-    const child = spawn('latexmk', args, { cwd: this.buildDir, env: texEnv(), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn('latexmk', args, {
+      cwd: this.buildDir,
+      env: texEnv(),
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
     this.child = child
     const collect = (chunk: Buffer): void => {
       if (output.length < 200_000) output += chunk.toString('utf8')

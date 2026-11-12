@@ -29,7 +29,7 @@ export function mountHome(root: HTMLElement): () => void {
       h('h1', null, 'LaTeX Writer'),
       h('span', { class: 'grow' }),
       h('button', { class: 'btn', type: 'button', onclick: openShareDialog }, icon('share'), ' Share'),
-      iconButton('settings', 'Settings', () => openSettingsDialog({ texFiles: [], onLeave: () => {} })),
+      iconButton('settings', 'Settings', () => openSettingsDialog({ texFiles: [], onLeave: () => { } })),
     ),
     main,
   )
@@ -143,22 +143,24 @@ export function mountHome(root: HTMLElement): () => void {
             { label: 'Open', onclick: () => void openProject(p.path, ws.path) },
             { label: 'Show in Finder', onclick: () => void api('POST', '/api/host/reveal', { path: p.path }).catch(fail) },
             'separator',
-            { label: 'Move to Trash', icon: 'trash', danger: true, onclick: async () => {
-              const ok = await confirmDialog({
-                title: 'Move project to Trash',
-                message: `Move "${p.name}" and all its files to the macOS Trash? You can put it back from the Trash.`,
-                confirmLabel: 'Move to Trash',
-                danger: true,
-              })
-              if (!ok) return
-              try {
-                await api('POST', '/api/host/project/trash', { path: p.path })
-                toast(`"${p.name}" was moved to the Trash`, 'info')
-                void showWorkspace(ws.path)
-              } catch (err) {
-                fail(err)
+            {
+              label: 'Move to Trash', icon: 'trash', danger: true, onclick: async () => {
+                const ok = await confirmDialog({
+                  title: 'Move project to Trash',
+                  message: `Move "${p.name}" and all its files to the macOS Trash? You can put it back from the Trash.`,
+                  confirmLabel: 'Move to Trash',
+                  danger: true,
+                })
+                if (!ok) return
+                try {
+                  await api('POST', '/api/host/project/trash', { path: p.path })
+                  toast(`"${p.name}" was moved to the Trash`, 'info')
+                  void showWorkspace(ws.path)
+                } catch (err) {
+                  fail(err)
+                }
               }
-            } },
+            },
           ])
         }),
       ))
@@ -206,13 +208,13 @@ export function mountHome(root: HTMLElement): () => void {
 
   // ---- folder picker ----------------------------------------------------------------
 
-  /** A button that opens the normal macOS folder dialog on this Mac. */
+  /** A button that opens the native folder selection dialog. */
   function finderButton(start: () => string | undefined, onChosen: (path: string) => void): HTMLButtonElement {
-    const label = h('span', null, 'Choose in Finder…')
-    const button = h('button', { class: 'btn btn-primary', type: 'button', title: 'Open the macOS folder dialog' }, icon('folder'), label)
+    const label = h('span', null, 'Choose folder…')
+    const button = h('button', { class: 'btn btn-primary', type: 'button', title: 'Open the folder selection dialog' }, icon('folder'), label)
     button.addEventListener('click', async () => {
       button.disabled = true
-      label.textContent = 'Waiting for Finder…'
+      label.textContent = 'Waiting for folder dialog…'
       try {
         const res = await api<{ path: string | null }>('POST', '/api/host/choose-folder', { start: start() })
         if (res.path) onChosen(res.path)
@@ -220,7 +222,7 @@ export function mountHome(root: HTMLElement): () => void {
         fail(err)
       } finally {
         button.disabled = false
-        label.textContent = 'Choose in Finder…'
+        label.textContent = 'Choose folder…'
       }
     })
     return button
@@ -253,18 +255,20 @@ export function mountHome(root: HTMLElement): () => void {
       pathEl.append(
         iconButton('up', 'Up one folder', () => b.parent && void go(b.parent)),
         h('span', { class: 'grow picker-current', title: b.path }, tildify(b.path)),
-        h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
-          const name = await promptDialog({ title: 'New folder', label: `Name (in ${tildify(b.path)})`, confirmLabel: 'Create' })
-          if (!name) return
-          try {
-            const res = await api<{ path: string }>('POST', '/api/host/mkdir', { parent: b.path, name })
-            void go(res.path)
-          } catch (err) {
-            fail(err)
-            // The folder we were in may have just been renamed or removed: refresh the view.
-            void go(b.path)
+        h('button', {
+          class: 'btn btn-small', type: 'button', onclick: async () => {
+            const name = await promptDialog({ title: 'New folder', label: `Name (in ${tildify(b.path)})`, confirmLabel: 'Create' })
+            if (!name) return
+            try {
+              const res = await api<{ path: string }>('POST', '/api/host/mkdir', { parent: b.path, name })
+              void go(res.path)
+            } catch (err) {
+              fail(err)
+              // The folder we were in may have just been renamed or removed: refresh the view.
+              void go(b.path)
+            }
           }
-        } }, icon('folder-plus'), ' New folder'),
+        }, icon('folder-plus'), ' New folder'),
       )
       if (!shortcuts.childElementCount) {
         for (const s of b.shortcuts) shortcuts.appendChild(h('button', { class: 'picker-shortcut', type: 'button', onclick: () => void go(s.path) }, icon('folder'), s.name))
@@ -343,8 +347,8 @@ export function mountLogin(root: HTMLElement, message: string | null, onDone: ()
       button,
     )))
   document.title = 'Join · LaTeX Writer'
-  ;(name.value ? code : name).focus()
-  return () => {}
+    ; (name.value ? code : name).focus()
+  return () => { }
 }
 
 export function mountWaiting(root: HTMLElement, onLeave: () => void): () => void {
@@ -357,5 +361,5 @@ export function mountWaiting(root: HTMLElement, onLeave: () => void): () => void
       h('button', { class: 'btn', type: 'button', onclick: onLeave }, icon('logout'), ' Leave'),
     )))
   document.title = 'Waiting · LaTeX Writer'
-  return () => {}
+  return () => { }
 }

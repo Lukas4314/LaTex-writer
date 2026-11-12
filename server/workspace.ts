@@ -35,10 +35,10 @@ export function isProjectDir(dir: string): boolean {
 /** The folder itself if it exists, otherwise the closest parent that still does (home as a last resort). */
 function nearestExistingDir(wanted: string): string {
   let current = path.normalize(wanted)
-  for (;;) {
+  for (; ;) {
     try {
       if (fs.statSync(current).isDirectory()) return current
-    } catch {}
+    } catch { }
     const parent = path.dirname(current)
     if (parent === current) return os.homedir()
     current = parent
@@ -94,11 +94,70 @@ let finderDialogOpen = false
  * Shows the standard macOS "choose folder" dialog on this Mac and returns the chosen folder,
  * or null if the user cancelled.
  */
+
 export function chooseFolderInFinder(startInput?: unknown): Promise<string | null> {
-  if (finderDialogOpen) throw new HttpError(409, 'The Finder dialog is already open. Look for it behind this window.')
-  const start = typeof startInput === 'string' && path.isAbsolute(startInput) ? nearestExistingDir(startInput) : os.homedir()
+  if (finderDialogOpen) {
+    throw new HttpError(409, 'The folder dialog is already open.')
+  }
+
+  const start =
+    typeof startInput === 'string' && path.isAbsolute(startInput)
+      ? nearestExistingDir(startInput)
+      : os.homedir()
+
   finderDialogOpen = true
+
   return new Promise((resolve, reject) => {
+    if (process.platform === 'win32') {
+      const script = `
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = "Choose the folder that holds your LaTeX projects"
+    $dialog.SelectedPath = $env:LATEXWRITER_START
+
+    if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+      Write-Output $dialog.SelectedPath
+    }
+  `
+
+      execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-STA',
+          '-Command',
+          script,
+        ],
+        {
+          timeout: 15 * 60 * 1000,
+          env: {
+            ...process.env,
+            LATEXWRITER_START: start,
+          },
+        },
+        (err, stdout, stderr) => {
+          finderDialogOpen = false
+
+          if (!err) {
+            const chosen = stdout.trim()
+            return resolve(chosen || null)
+          }
+
+          console.error('Windows folder dialog failed')
+          console.error('Error:', err)
+          console.error('stdout:', stdout)
+          console.error('stderr:', stderr)
+
+          reject(new HttpError(
+            500,
+            `The folder dialog failed: ${stderr || err.message}`
+          ))
+        },
+      )
+
+      return
+    }
+    // macOS
     execFile(
       '/usr/bin/osascript',
       [
@@ -112,14 +171,18 @@ export function chooseFolderInFinder(startInput?: unknown): Promise<string | nul
       { timeout: 15 * 60 * 1000 },
       (err, stdout, stderr) => {
         finderDialogOpen = false
+
         if (!err) {
           const chosen = stdout.trim()
           return resolve(chosen.length > 1 ? chosen.replace(/\/$/, '') : chosen || null)
         }
-        // -128 is AppleScript's "user cancelled".
-        if (/-128|User canceled/i.test(`${stderr} ${err.message}`)) return resolve(null)
+
+        if (/-128|User canceled/i.test(`${stderr} ${err.message}`)) {
+          return resolve(null)
+        }
+
         console.error('Finder dialog failed:', stderr || err.message)
-        reject(new HttpError(500, 'The Finder dialog could not be opened. Use the folder list here instead.'))
+        reject(new HttpError(500, 'The folder dialog could not be opened.'))
       },
     )
   })
@@ -144,7 +207,7 @@ function summarize(dir: string): ProjectSummary {
   } catch {
     try {
       modified = fs.statSync(dir).mtimeMs
-    } catch {}
+    } catch { }
   }
   return { name: settings.name, path: dir, folder: path.basename(dir), mainFile: settings.mainFile, modified }
 }
